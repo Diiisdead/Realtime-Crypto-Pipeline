@@ -99,22 +99,32 @@ flowchart TB
   subgraph flink [Flink Job]
     Source[KafkaSource]
     Parse[Parse JSON]
+    FilterValid[Filter valid timestamp]
+    WM[Assign event time and watermarks]
     KeyBy[KeyBy symbol]
     MAFunc[KeyedProcessFunction]
     State[ListState: last 20 prices]
-    Sink[JdbcSink]
-    Source --> Parse --> KeyBy --> MAFunc
+    MainSink[JdbcSink]
+    LateOut[Side output: late ticks]
+    LogSink[Log]
+    KafkaDLQ[Kafka DLQ optional]
+    Source --> Parse --> FilterValid --> WM --> KeyBy --> MAFunc
     MAFunc --> State
     State --> MAFunc
-    MAFunc --> Sink
+    MAFunc --> MainSink
+    MAFunc --> LateOut
+    LateOut --> LogSink
+    LateOut --> KafkaDLQ
   end
   KafkaTopic[price-ticks] --> Source
-  Sink --> TSDB[TimescaleDB]
+  MainSink --> TSDB[TimescaleDB]
 ```
 
 - **KafkaSource**: Reads `price-ticks`, JSON → `PriceTick`.
-- **KeyedProcessFunction**: Per symbol, ListState of last 20 prices; on each event updates state, computes MA(5), MA(20), emits `PriceWithMA`.
-- **JdbcSink**: Inserts into `price_ticks` (time, symbol, price, volume, ma_short, ma_long).
+- **Event time & watermarks**: Only records with valid ISO-8601 `timestamp` are kept. Event time is assigned from `PriceTick.timestamp`; watermarks use *bounded out-of-orderness* (configurable `WATERMARK_OUT_OF_ORDER_SEC`, default 10s).
+- **KeyedProcessFunction**: Per symbol, ListState of last 20 prices; on each event compares event time to current watermark. If `eventTime < watermark - allowedLateness` (configurable `ALLOWED_LATENESS_SEC`, default 5s), the tick is **late** and sent to a side output only; otherwise state is updated, MA(5) and MA(20) are computed, and `PriceWithMA` is emitted.
+- **JdbcSink**: Inserts on-time results into `price_ticks` (time, symbol, price, volume, ma_short, ma_long).
+- **Late-arriving data**: Side output `late-ticks` is always logged (stdout). If env `LATE_TICKS_KAFKA_TOPIC` is set, late ticks are also written to that Kafka topic (DLQ) as JSON for replay or analysis.
 
 ### 3.4 Storage — TimescaleDB
 

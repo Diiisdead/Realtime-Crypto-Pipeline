@@ -51,7 +51,7 @@ Real-time price pipeline: ingest from Binance WebSocket → Kafka → Flink (MA5
 - **Flink**: Consumes `price-ticks`, keys by symbol, keeps last 20 prices, computes MA(5) and MA(20), writes to table `price_ticks`.
 - **Grafana**: Queries TimescaleDB, displays price, MAs and volume by symbol and time range.
 
-For data flow, components and deployment details: **[ARCHITECTURE.md](ARCHITECTURE.md)**.
+For data flow and deployment: **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
 ---
 

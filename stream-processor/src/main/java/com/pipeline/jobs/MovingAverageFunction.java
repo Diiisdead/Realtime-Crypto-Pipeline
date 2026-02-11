@@ -5,6 +5,7 @@ import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.util.Collector;
+import org.apache.flink.util.OutputTag;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -13,13 +14,23 @@ import java.util.List;
 /**
  * KeyedProcessFunction: for each symbol, keep last 20 prices in state;
  * on each event compute MA(5) and MA(20) and emit PriceWithMA.
+ * Events that arrive after the watermark has passed their event time + allowed lateness
+ * are sent to the late-ticks side output and not used to update state.
  */
 public class MovingAverageFunction extends KeyedProcessFunction<String, PriceTick, PriceWithMA> {
 
     private static final int MA_SHORT_WINDOW = 5;
     private static final int MA_LONG_WINDOW = 20;
 
+    private final long allowedLatenessMs;
+    private final OutputTag<PriceTick> lateTicksTag;
+
     private transient ListState<Double> priceHistoryState;
+
+    public MovingAverageFunction(long allowedLatenessMs, OutputTag<PriceTick> lateTicksTag) {
+        this.allowedLatenessMs = allowedLatenessMs;
+        this.lateTicksTag = lateTicksTag;
+    }
 
     @Override
     public void open(Configuration parameters) {
@@ -30,6 +41,15 @@ public class MovingAverageFunction extends KeyedProcessFunction<String, PriceTic
 
     @Override
     public void processElement(PriceTick tick, KeyedProcessFunction<String, PriceTick, PriceWithMA>.Context ctx, Collector<PriceWithMA> out) throws Exception {
+        long eventTime = ctx.timestamp();
+        long watermark = ctx.timerService().currentWatermark();
+
+        // Consider late only when we have a meaningful watermark and event is past allowed lateness
+        if (watermark > Long.MIN_VALUE && eventTime < watermark - allowedLatenessMs) {
+            ctx.output(lateTicksTag, tick);
+            return;
+        }
+
         List<Double> prices = new ArrayList<>();
         for (Double p : priceHistoryState.get()) {
             prices.add(p);
