@@ -1,0 +1,106 @@
+{
+  "title": "Price Pipeline - Real-time",
+  "uid": "price-pipeline",
+  "tags": ["pipeline", "crypto", "streaming"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "symbol",
+        "type": "query",
+        "datasource": { "type": "postgres", "uid": "timescaledb" },
+        "query": "SELECT DISTINCT symbol FROM price_ticks ORDER BY symbol",
+        "current": { "selected": true, "text": "BTCUSDT", "value": "BTCUSDT" },
+        "hide": 0,
+        "label": "Symbol",
+        "refresh": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Price & Moving Averages",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [
+        {
+          "refId": "price",
+          "rawSql": "SELECT time AS \"time\", price AS \"price\" FROM price_ticks WHERE symbol = '$symbol' AND time >= $__timeFrom() AND time <= $__timeTo() ORDER BY time",
+          "format": "time_series"
+        },
+        {
+          "refId": "ma_short",
+          "rawSql": "SELECT time AS \"time\", ma_short AS \"MA(5)\" FROM price_ticks WHERE symbol = '$symbol' AND time >= $__timeFrom() AND time <= $__timeTo() ORDER BY time",
+          "format": "time_series",
+          "legendFormat": "MA(5)"
+        },
+        {
+          "refId": "ma_long",
+          "rawSql": "SELECT time AS \"time\", ma_long AS \"MA(20)\" FROM price_ticks WHERE symbol = '$symbol' AND time >= $__timeFrom() AND time <= $__timeTo() ORDER BY time",
+          "format": "time_series",
+          "legendFormat": "MA(20)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 2, "fillOpacity": 10 },
+          "unit": "short"
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "price" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "MA(5)" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "MA(20)" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "id": 2,
+      "title": "Volume",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 9 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT time AS \"time\", volume AS \"volume\" FROM price_ticks WHERE symbol = '$symbol' AND time >= $__timeFrom() AND time <= $__timeTo() ORDER BY time",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "fillOpacity": 60 },
+          "unit": "short"
+        }
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "id": 3,
+      "title": "Overview - Latest price (all symbols)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 15 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT symbol AS \"Symbol\", time AS \"Last update\", price AS \"Price\", ma_short AS \"MA(5)\", ma_long AS \"MA(20)\" FROM (SELECT DISTINCT ON (symbol) symbol, time, price, ma_short, ma_long FROM price_ticks WHERE time >= $__timeFrom() AND time <= $__timeTo() ORDER BY symbol, time DESC) t ORDER BY symbol",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Price" }, "properties": [{ "id": "decimals", "value": 4 }] },
+          { "matcher": { "id": "byName", "options": "MA(5)" }, "properties": [{ "id": "decimals", "value": 4 }] },
+          { "matcher": { "id": "byName", "options": "MA(20)" }, "properties": [{ "id": "decimals", "value": 4 }] }
+        ]
+      }
+    }
+  ]
+}
