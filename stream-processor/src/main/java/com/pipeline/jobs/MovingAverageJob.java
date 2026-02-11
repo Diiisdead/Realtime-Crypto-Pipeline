@@ -19,7 +19,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.time.Duration;
-import java.time.Instant;
 
 /**
  * Flink job: Kafka (price-ticks) -> KeyedProcessFunction (MA) -> TimescaleDB.
@@ -62,14 +61,14 @@ public class MovingAverageJob {
         DataStream<PriceTick> parsed = raw
             .filter(s -> s != null && !s.isEmpty())
             .map(MovingAverageJob::parseTick)
-            .filter(t -> t != null);
+            .filter(t -> t != null)
+            .filter(PriceTickValidator::isValid);
 
-        // Only ticks with valid timestamp get event time and watermarks; skip invalid to avoid fake time
+        // Only ticks with valid timestamp get event time and watermarks (validator already ensured it)
         DataStream<PriceTick> ticks = parsed
-            .filter(t -> hasValidTimestamp(t.getTimestamp()))
             .assignTimestampsAndWatermarks(
                 WatermarkStrategy.<PriceTick>forBoundedOutOfOrderness(Duration.ofSeconds(outOfOrderSec))
-                    .withTimestampAssigner((tick, prev) -> parseTimestampToMillis(tick.getTimestamp()))
+                    .withTimestampAssigner((tick, prev) -> PriceTickValidator.parseTimestampToMillis(tick.getTimestamp()))
             );
 
         long allowedLatenessMs = allowedLatenessSec * 1000L;
@@ -142,26 +141,8 @@ public class MovingAverageJob {
         }
     }
 
-    private static boolean hasValidTimestamp(String ts) {
-        if (ts == null || ts.isEmpty()) return false;
-        try {
-            Instant.parse(ts);
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private static long parseTimestampToMillis(String ts) {
-        if (ts == null || ts.isEmpty()) return Long.MIN_VALUE;
-        try {
-            return Instant.parse(ts).toEpochMilli();
-        } catch (Exception e) {
-            return Long.MIN_VALUE;
-        }
-    }
-
-    private static PriceTick parseTick(String json) {
+    /** Package-private for tests. Parses JSON to PriceTick; returns null on parse failure. */
+    static PriceTick parseTick(String json) {
         try {
             JsonNode n = JSON.readTree(json);
             PriceTick t = new PriceTick();
